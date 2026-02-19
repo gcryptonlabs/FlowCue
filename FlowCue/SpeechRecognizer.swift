@@ -81,6 +81,9 @@ class SpeechRecognizer {
     var shouldDismiss: Bool = false
     var shouldAdvancePage: Bool = false
     var speechStartTime: Date? = nil
+    var debugStatus: String = ""
+    /// The locale actually used for the current recognition session (for UI display)
+    var activeLocale: String = ""
 
     /// True when recent audio levels indicate the user is actively speaking
     var isSpeaking: Bool {
@@ -103,6 +106,21 @@ class SpeechRecognizer {
     private var pendingRestart: DispatchWorkItem?
     private var sessionGeneration: Int = 0
     private var suppressConfigChange: Bool = false
+    /// Locales that failed with error 1107 in this session — skip on retry
+    private var failedLocales: Set<String> = []
+
+    // MARK: - Whisper backends
+    private var whisperProcess: Process?
+    private var whisperOutputBuffer: String = ""
+
+    // MARK: - OpenAI Whisper cloud backend
+    private let whisperClient = OpenAIWhisperClient()
+    private var cloudAudioEngine: AVAudioEngine?
+    private var cloudChunkBuffers: [AVAudioPCMBuffer] = []
+    private var cloudChunkTimer: Timer?
+    private var cloudRecordingFormat: AVAudioFormat?
+    private var isCloudTranscribing = false
+    private var cloudAccumulatedText = ""
 
     /// Jump highlight to a specific char offset (e.g. when user taps a word)
     func jumpTo(charOffset: Int) {
@@ -120,7 +138,21 @@ class SpeechRecognizer {
         recognizer.processString(text)
         guard let lang = recognizer.dominantLanguage else { return nil }
         let supported = SFSpeechRecognizer.supportedLocales()
-        return supported.first(where: { $0.identifier.hasPrefix(lang.rawValue) })?.identifier
+        let matching = supported.filter { $0.identifier.hasPrefix(lang.rawValue) }
+        guard !matching.isEmpty else { return nil }
+        // Prefer locale matching the user's region, then standard variants (US, RU, DE, etc.)
+        let userRegion = Locale.current.region?.identifier ?? "US"
+        let standardRegions = ["US", "RU", "GB", "DE", "FR", "ES", "IT", "JP", "KR", "CN", "BR", "IN"]
+        let sorted = matching.sorted { a, b in
+            let aRegion = Locale(identifier: a.identifier).region?.identifier ?? ""
+            let bRegion = Locale(identifier: b.identifier).region?.identifier ?? ""
+            if aRegion == userRegion && bRegion != userRegion { return true }
+            if bRegion == userRegion && aRegion != userRegion { return false }
+            let aStd = standardRegions.firstIndex(of: aRegion) ?? standardRegions.count
+            let bStd = standardRegions.firstIndex(of: bRegion) ?? standardRegions.count
+            return aStd < bStd
+        }
+        return sorted.first?.identifier
     }
 
     func start(with text: String) {
@@ -138,6 +170,7 @@ class SpeechRecognizer {
         error = nil
         speechStartTime = Date()
         sessionGeneration += 1
+        failedLocales.removeAll()
 
         // Check microphone permission first
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -162,7 +195,16 @@ class SpeechRecognizer {
             break
         }
 
-        requestSpeechAuthAndBegin()
+        switch NotchSettings.shared.speechEngine {
+        case .whisperLocal:
+            beginWhisperRecognition()
+            return
+        case .whisperCloud:
+            beginCloudWhisperRecognition()
+            return
+        case .apple:
+            requestSpeechAuthAndBegin()
+        }
     }
 
     private func requestSpeechAuthAndBegin() {
@@ -194,6 +236,8 @@ class SpeechRecognizer {
     func stop() {
         isListening = false
         speechStartTime = nil
+        stopWhisper()
+        stopCloudWhisper()
         cleanupRecognition()
     }
 
@@ -202,6 +246,8 @@ class SpeechRecognizer {
         speechStartTime = nil
         sourceText = ""
         retryCount = maxRetries
+        stopWhisper()
+        stopCloudWhisper()
         cleanupRecognition()
     }
 
@@ -280,14 +326,27 @@ class SpeechRecognizer {
         }
 
         let locale: String
-        if NotchSettings.shared.autoDetectLanguage, let detected = Self.detectLanguage(from: sourceText) {
+        if NotchSettings.shared.autoDetectLanguage, let detected = Self.detectLanguage(from: sourceText), !failedLocales.contains(detected) {
             locale = detected
+            debugStatus = "Auto: \(detected)"
         } else {
-            locale = NotchSettings.shared.speechLocale
+            let manual = NotchSettings.shared.speechLocale
+            if !failedLocales.contains(manual) {
+                locale = manual
+                debugStatus = "Manual: \(manual)"
+            } else {
+                // Last resort fallback
+                locale = "en-US"
+                debugStatus = "Fallback: en-US"
+            }
         }
+        activeLocale = locale
+        NSLog("[FlowCue] Speech locale: \(locale)")
         speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: locale))
         guard let speechRecognizer, speechRecognizer.isAvailable else {
-            error = "Speech recognizer not available"
+            error = "Speech recognizer not available for \(locale). Try downloading the language in System Settings → General → Keyboard → Dictation → Languages."
+            debugStatus = "ERR: unavailable \(locale)"
+            NSLog("[FlowCue] Speech recognizer NOT available for \(locale)")
             return
         }
 
@@ -357,15 +416,41 @@ class SpeechRecognizer {
                     guard self.sessionGeneration == currentGeneration else { return }
                     self.retryCount = 0 // Reset on success
                     self.lastSpokenText = spoken
+                    self.debugStatus = "Heard: \(spoken.suffix(30))"
+                    NSLog("[FlowCue] Recognized: \(spoken.suffix(50))")
                     self.matchCharacters(spoken: spoken)
+                    NSLog("[FlowCue] charCount=\(self.recognizedCharCount)/\(self.sourceText.count)")
                 }
             }
-            if error != nil {
+            if let err = error {
                 DispatchQueue.main.async {
+                    let nsErr = err as NSError
+                    NSLog("[FlowCue] Recognition error: domain=\(nsErr.domain) code=\(nsErr.code) \(err.localizedDescription)")
+                    self.debugStatus = "ERR: \(err.localizedDescription.prefix(40))"
                     // If recognitionRequest is nil, cleanup already ran (intentional cancel) — don't retry
                     guard self.recognitionRequest != nil else { return }
+
+                    // Error 1107: locale-specific failure (language model missing or unsupported)
+                    // Mark locale as failed and try fallback
+                    if nsErr.code == 1107 {
+                        self.failedLocales.insert(self.activeLocale)
+                        NSLog("[FlowCue] Locale \(self.activeLocale) failed (1107), trying fallback. Failed: \(self.failedLocales)")
+                        // Try next locale in chain: auto-detect → manual picker → en-US
+                        let manual = NotchSettings.shared.speechLocale
+                        let hasFallback = !self.failedLocales.contains(manual) || !self.failedLocales.contains("en-US")
+                        if hasFallback {
+                            self.scheduleBeginRecognition(after: 0.3)
+                        } else {
+                            self.error = "Speech recognition unavailable. Download language models in System Settings → General → Keyboard → Dictation → Languages."
+                            self.isListening = false
+                        }
+                        return
+                    }
+
                     if self.isListening && !self.shouldDismiss && !self.sourceText.isEmpty && self.retryCount < self.maxRetries {
                         self.retryCount += 1
+                        // Preserve progress: start matching from current position after restart
+                        self.matchStartOffset = self.recognizedCharCount
                         let delay = min(Double(self.retryCount) * 0.5, 1.5)
                         self.scheduleBeginRecognition(after: delay)
                     } else {
@@ -375,12 +460,23 @@ class SpeechRecognizer {
             }
         }
 
+        // Suppress config-change observer for 2s after engine start to avoid restart loops
+        // (the speech recognition subsystem triggers config changes during setup)
+        suppressConfigChange = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            self?.suppressConfigChange = false
+        }
+
         do {
             audioEngine.prepare()
             try audioEngine.start()
             isListening = true
+            debugStatus += " | Listening"
+            NSLog("[FlowCue] Audio engine started, listening=true")
         } catch {
             // Transient failure after a device switch — retry with longer delay
+            debugStatus = "ERR: engine \(error.localizedDescription)"
+            NSLog("[FlowCue] Audio engine FAILED: \(error.localizedDescription)")
             if retryCount < maxRetries {
                 retryCount += 1
                 scheduleBeginRecognition(after: 0.5)
@@ -615,5 +711,297 @@ class SpeechRecognizer {
     private static func normalize(_ text: String) -> String {
         text.lowercased()
             .filter { $0.isLetter || $0.isNumber || $0.isWhitespace }
+    }
+
+    // MARK: - Whisper backend
+
+    private func beginWhisperRecognition() {
+        stopWhisper()
+        cleanupRecognition()
+
+        let modelPath = NotchSettings.shared.whisperModelPath
+        guard FileManager.default.fileExists(atPath: modelPath) else {
+            error = "Whisper model not found at: \(modelPath)"
+            debugStatus = "ERR: model not found"
+            NSLog("[FlowCue] Whisper model not found: \(modelPath)")
+            return
+        }
+
+        let whisperBin = "/opt/homebrew/bin/whisper-stream"
+        guard FileManager.default.fileExists(atPath: whisperBin) else {
+            error = "whisper-stream not found. Install: brew install whisper-cpp"
+            debugStatus = "ERR: whisper-stream missing"
+            return
+        }
+
+        // Start audio engine just for waveform visualization
+        audioEngine = AVAudioEngine()
+        let inputNode = audioEngine.inputNode
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+        guard recordingFormat.sampleRate > 0, recordingFormat.channelCount > 0 else {
+            error = "Audio input unavailable"
+            return
+        }
+        inputNode.removeTap(onBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
+            guard let channelData = buffer.floatChannelData?[0] else { return }
+            let frameLength = Int(buffer.frameLength)
+            var sum: Float = 0
+            for i in 0..<frameLength { sum += channelData[i] * channelData[i] }
+            let rms = sqrt(sum / Float(max(frameLength, 1)))
+            let level = CGFloat(min(rms * 5, 1.0))
+            DispatchQueue.main.async {
+                self?.audioLevels.append(level)
+                if (self?.audioLevels.count ?? 0) > 30 { self?.audioLevels.removeFirst() }
+            }
+        }
+        do {
+            audioEngine.prepare()
+            try audioEngine.start()
+        } catch {
+            NSLog("[FlowCue] Waveform engine failed: \(error)")
+        }
+
+        // Launch whisper-stream
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: whisperBin)
+        process.arguments = [
+            "-m", modelPath,
+            "-l", "auto",
+            "--step", "3000",
+            "--length", "5000",
+            "--keep", "500",
+            "-t", "4",
+            "--vad-thold", "0.5",
+        ]
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        // Discard stderr (model loading info)
+        process.standardError = FileHandle.nullDevice
+
+        whisperOutputBuffer = ""
+        let currentGen = sessionGeneration
+
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let chunk = String(data: data, encoding: .utf8) else { return }
+            DispatchQueue.main.async {
+                guard let self, self.sessionGeneration == currentGen else { return }
+                self.processWhisperOutput(chunk)
+            }
+        }
+
+        process.terminationHandler = { [weak self] proc in
+            DispatchQueue.main.async {
+                guard let self, self.sessionGeneration == currentGen else { return }
+                NSLog("[FlowCue] whisper-stream exited with code \(proc.terminationStatus)")
+                if self.isListening && !self.shouldDismiss {
+                    self.debugStatus = "Whisper stopped, restarting..."
+                    self.scheduleBeginRecognition(after: 1.0)
+                }
+            }
+        }
+
+        do {
+            try process.run()
+            whisperProcess = process
+            isListening = true
+            activeLocale = "auto (Whisper)"
+            debugStatus = "Whisper listening..."
+            NSLog("[FlowCue] whisper-stream started, PID=\(process.processIdentifier)")
+        } catch {
+            self.error = "Failed to start whisper-stream: \(error.localizedDescription)"
+            debugStatus = "ERR: \(error.localizedDescription)"
+            NSLog("[FlowCue] whisper-stream failed: \(error)")
+        }
+    }
+
+    private func processWhisperOutput(_ chunk: String) {
+        whisperOutputBuffer += chunk
+
+        // Strip ANSI escape codes: ESC[...letter
+        let stripped = whisperOutputBuffer.replacingOccurrences(
+            of: "\\x1B\\[[0-9;]*[A-Za-z]|\\[2K",
+            with: "",
+            options: .regularExpression
+        )
+
+        // Extract meaningful text (skip blank audio markers and whitespace-only)
+        let lines = stripped.components(separatedBy: .newlines)
+        var recognizedText = ""
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { continue }
+            if trimmed.contains("[BLANK_AUDIO]") { continue }
+            if trimmed.hasPrefix("whisper_") { continue }
+            if trimmed.hasPrefix("init:") { continue }
+            if trimmed.hasPrefix("[Start") { continue }
+            if trimmed.hasPrefix("main:") { continue }
+            recognizedText += " " + trimmed
+        }
+
+        let cleaned = recognizedText.trimmingCharacters(in: .whitespaces)
+        guard !cleaned.isEmpty else { return }
+
+        lastSpokenText = String(cleaned.suffix(60))
+        debugStatus = "Whisper: \(cleaned.suffix(30))"
+        NSLog("[FlowCue] Whisper heard: \(cleaned.suffix(80))")
+        matchCharacters(spoken: cleaned)
+        NSLog("[FlowCue] charCount=\(recognizedCharCount)/\(sourceText.count)")
+    }
+
+    private func stopWhisper() {
+        if let process = whisperProcess, process.isRunning {
+            process.terminate()
+            NSLog("[FlowCue] whisper-stream terminated")
+        }
+        whisperProcess = nil
+        whisperOutputBuffer = ""
+    }
+
+    // MARK: - OpenAI Whisper Cloud backend
+
+    private func beginCloudWhisperRecognition() {
+        stopCloudWhisper()
+
+        let apiKey = NotchSettings.shared.openaiApiKey
+        guard !apiKey.isEmpty else {
+            error = "No OpenAI API key. Add it in Settings → Voice."
+            debugStatus = "ERR: no API key"
+            return
+        }
+
+        let engine = AVAudioEngine()
+        let inputNode = engine.inputNode
+
+        // Apply mic selection
+        let micUID = NotchSettings.shared.selectedMicUID
+        if !micUID.isEmpty, let deviceID = AudioInputDevice.deviceID(forUID: micUID) {
+            if let audioUnit = inputNode.audioUnit {
+                var devID = deviceID
+                AudioUnitSetProperty(audioUnit, kAudioOutputUnitProperty_CurrentDevice,
+                                     kAudioUnitScope_Global, 0, &devID,
+                                     UInt32(MemoryLayout<AudioDeviceID>.size))
+                AudioUnitUninitialize(audioUnit)
+                AudioUnitInitialize(audioUnit)
+            }
+        }
+
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+        guard recordingFormat.sampleRate > 0, recordingFormat.channelCount > 0 else {
+            self.error = "Audio input unavailable"
+            return
+        }
+        cloudRecordingFormat = recordingFormat
+
+        inputNode.removeTap(onBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
+            guard let self else { return }
+            // Waveform visualization
+            if let channelData = buffer.floatChannelData?[0] {
+                let frameLength = Int(buffer.frameLength)
+                var sum: Float = 0
+                for i in 0..<frameLength { sum += channelData[i] * channelData[i] }
+                let rms = sqrt(sum / Float(max(frameLength, 1)))
+                let level = CGFloat(min(rms * 5, 1.0))
+                DispatchQueue.main.async {
+                    self.audioLevels.append(level)
+                    if self.audioLevels.count > 30 { self.audioLevels.removeFirst() }
+                }
+            }
+            // Accumulate audio for transcription
+            DispatchQueue.main.async {
+                self.cloudChunkBuffers.append(buffer)
+            }
+        }
+
+        do {
+            engine.prepare()
+            try engine.start()
+            cloudAudioEngine = engine
+            isListening = true
+            activeLocale = "auto (OpenAI)"
+            debugStatus = "Cloud Whisper listening..."
+            NSLog("[FlowCue] OpenAI Whisper engine started")
+
+            cloudChunkTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: true) { [weak self] _ in
+                self?.sendCloudChunk()
+            }
+        } catch {
+            self.error = "Audio engine failed: \(error.localizedDescription)"
+            debugStatus = "ERR: engine \(error.localizedDescription)"
+        }
+    }
+
+    private func sendCloudChunk() {
+        guard !cloudChunkBuffers.isEmpty, !isCloudTranscribing else { return }
+        guard let format = cloudRecordingFormat else { return }
+
+        let buffers = cloudChunkBuffers
+        cloudChunkBuffers = []
+
+        // Merge buffers
+        let totalFrames = buffers.reduce(AVAudioFrameCount(0)) { $0 + $1.frameLength }
+        guard totalFrames > 0, let merged = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: totalFrames) else { return }
+
+        var offset: AVAudioFrameCount = 0
+        for buf in buffers {
+            let count = buf.frameLength
+            guard let src = buf.floatChannelData, let dst = merged.floatChannelData else { continue }
+            for ch in 0..<Int(format.channelCount) {
+                memcpy(dst[ch].advanced(by: Int(offset)), src[ch], Int(count) * MemoryLayout<Float>.size)
+            }
+            offset += count
+        }
+        merged.frameLength = totalFrames
+
+        isCloudTranscribing = true
+        let currentGen = sessionGeneration
+
+        Task {
+            do {
+                let wavURL = try OpenAIWhisperClient.convertToWAV(buffer: merged, fromFormat: format)
+                defer { try? FileManager.default.removeItem(at: wavURL) }
+
+                let apiKey = NotchSettings.shared.openaiApiKey
+                let text = try await whisperClient.transcribe(wavFileURL: wavURL, apiKey: apiKey)
+
+                await MainActor.run {
+                    guard self.sessionGeneration == currentGen else { return }
+                    self.isCloudTranscribing = false
+                    let trimmed = text.trimmingCharacters(in: .whitespaces)
+                    guard !trimmed.isEmpty else { return }
+
+                    self.cloudAccumulatedText += " " + trimmed
+                    let cleaned = self.cloudAccumulatedText.trimmingCharacters(in: .whitespaces)
+                    self.lastSpokenText = String(cleaned.suffix(60))
+                    self.debugStatus = "Cloud: \(cleaned.suffix(30))"
+                    NSLog("[FlowCue] Cloud Whisper: \(cleaned.suffix(80))")
+                    self.matchCharacters(spoken: cleaned)
+                    NSLog("[FlowCue] charCount=\(self.recognizedCharCount)/\(self.sourceText.count)")
+                }
+            } catch {
+                await MainActor.run {
+                    self.isCloudTranscribing = false
+                    self.debugStatus = "Cloud ERR: \(error.localizedDescription.prefix(40))"
+                    NSLog("[FlowCue] Cloud Whisper error: \(error)")
+                }
+            }
+        }
+    }
+
+    private func stopCloudWhisper() {
+        cloudChunkTimer?.invalidate()
+        cloudChunkTimer = nil
+        if let engine = cloudAudioEngine, engine.isRunning {
+            engine.stop()
+            engine.inputNode.removeTap(onBus: 0)
+        }
+        cloudAudioEngine = nil
+        cloudChunkBuffers = []
+        cloudRecordingFormat = nil
+        isCloudTranscribing = false
+        cloudAccumulatedText = ""
     }
 }

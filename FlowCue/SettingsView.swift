@@ -296,21 +296,33 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
 struct SettingsView: View {
     @Bindable var settings: NotchSettings
+    var isSidebar: Bool = false
+    var onClose: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var previewController = NotchPreviewController()
     @State private var selectedTab: SettingsTab = .style
     @State private var showResetConfirmation = false
 
+    private func close() {
+        if let onClose {
+            onClose()
+        } else {
+            dismiss()
+        }
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             // Sidebar
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Settings")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .textCase(.uppercase)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 6)
+            VStack(alignment: isSidebar ? .center : .leading, spacing: 2) {
+                if !isSidebar {
+                    Text("Settings")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .textCase(.uppercase)
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 6)
+                }
 
                 ForEach(SettingsTab.allCases) { tab in
                     if tab == .scripts {
@@ -323,27 +335,53 @@ struct SettingsView: View {
                             selectedTab = tab
                         }
                     } label: {
-                        HStack(spacing: 7) {
-                            Image(systemName: tab.icon)
-                                .font(.system(size: 12, weight: .medium))
-                                .frame(width: 16)
-                            Text(tab.label)
-                                .font(.system(size: 13, weight: .regular))
+                        if isSidebar {
+                            VStack(spacing: 2) {
+                                Image(systemName: tab.icon)
+                                    .font(.system(size: 14, weight: .medium))
+                                Text(tab.label)
+                                    .font(.system(size: 9, weight: .medium))
+                            }
+                            .frame(width: 48, height: 40)
+                            .background(selectedTab == tab ? Color.accentColor.opacity(0.1) : Color.clear)
+                            .foregroundStyle(selectedTab == tab ? Color.accentColor : .secondary)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        } else {
+                            HStack(spacing: 7) {
+                                Image(systemName: tab.icon)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .frame(width: 16)
+                                Text(tab.label)
+                                    .font(.system(size: 13, weight: .regular))
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(selectedTab == tab ? Color.accentColor.opacity(0.1) : Color.clear)
+                            .foregroundStyle(selectedTab == tab ? Color.accentColor : .primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(selectedTab == tab ? Color.accentColor.opacity(0.1) : Color.clear)
-                        .foregroundStyle(selectedTab == tab ? Color.accentColor : .primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
                 }
 
                 Spacer()
+
+                if isSidebar {
+                    Button {
+                        showResetConfirmation = true
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Reset All Settings")
+                    .padding(.bottom, 4)
+                }
             }
-            .padding(12)
-            .frame(width: 155)
+            .padding(isSidebar ? 6 : 12)
+            .frame(width: isSidebar ? 60 : 155)
             .frame(maxHeight: .infinity)
             .background(.regularMaterial)
 
@@ -368,31 +406,33 @@ struct SettingsView: View {
                     libraryTab
                 }
 
-                Divider()
+                if !isSidebar {
+                    Divider()
 
-                HStack {
-                    Button("Reset All") {
-                        showResetConfirmation = true
+                    HStack {
+                        Button("Reset All") {
+                            showResetConfirmation = true
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .controlSize(.regular)
+
+                        Spacer()
+
+                        Button("Done") {
+                            close()
+                        }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
                     }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(.secondary)
-                    .controlSize(.regular)
-
-                    Spacer()
-
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.regular)
+                    .padding(12)
                 }
-                .padding(12)
             }
             .frame(maxWidth: .infinity)
         }
-        .frame(width: 500)
-        .frame(minHeight: 280, maxHeight: 500)
+        .frame(width: isSidebar ? 380 : 500)
+        .frame(minHeight: isSidebar ? nil : 280, maxHeight: isSidebar ? .infinity : 500)
         .background(.regularMaterial)
         .alert("Reset All Settings?", isPresented: $showResetConfirmation) {
             Button("Cancel", role: .cancel) { }
@@ -405,6 +445,7 @@ struct SettingsView: View {
             Text("This will restore all settings to their defaults.")
         }
         .onAppear {
+            guard !FlowCueService.shared.overlayController.isShowing else { return }
             if settings.overlayMode != .fullscreen {
                 previewController.show(settings: settings)
                 if settings.followCursorWhenUndocked && settings.overlayMode == .floating {
@@ -637,20 +678,109 @@ struct SettingsView: View {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Speech Language")
+                    Text("Recognition Engine")
                         .font(.system(size: 13, weight: .medium))
 
-                    Toggle("Auto-detect from text", isOn: $settings.autoDetectLanguage)
-                        .font(.system(size: 12))
+                    Picker("", selection: $settings.speechEngine) {
+                        ForEach(SpeechEngine.allCases) { engine in
+                            Text(engine.label).tag(engine)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
 
-                    if !settings.autoDetectLanguage {
-                        Picker("", selection: $settings.speechLocale) {
+                    Text(settings.speechEngine.description)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+
+                Divider()
+
+                switch settings.speechEngine {
+                case .apple:
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Speech Language")
+                            .font(.system(size: 13, weight: .medium))
+
+                        Toggle("Auto-detect from text", isOn: $settings.autoDetectLanguage)
+                            .font(.system(size: 12))
+
+                        if settings.autoDetectLanguage {
+                            Text("Language is detected from your script text. Use the picker below to override if detection is wrong.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                        }
+
+                        Picker(settings.autoDetectLanguage ? "Fallback / Override" : "Language", selection: $settings.speechLocale) {
                             ForEach(SFSpeechRecognizer.supportedLocales().sorted(by: { $0.identifier < $1.identifier }), id: \.identifier) { locale in
                                 Text(Locale.current.localizedString(forIdentifier: locale.identifier) ?? locale.identifier)
                                     .tag(locale.identifier)
                             }
                         }
                         .labelsHidden()
+
+                        Text("If a language doesn't work, download its dictation model: System Settings → General → Keyboard → Dictation → Languages.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+
+                case .whisperLocal:
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Local Model")
+                            .font(.system(size: 13, weight: .medium))
+
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .font(.system(size: 12))
+                            Text("whisper.cpp ready")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+
+                        Text("Auto-detects language from speech. Supports Russian, English, and 97 other languages.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+
+                case .whisperCloud:
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("OpenAI API Key")
+                            .font(.system(size: 13, weight: .medium))
+
+                        HStack(spacing: 8) {
+                            if whisperKeyVisible {
+                                TextField("sk-...", text: $settings.openaiApiKey)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(size: 12, design: .monospaced))
+                            } else {
+                                SecureField("sk-...", text: $settings.openaiApiKey)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(size: 12, design: .monospaced))
+                            }
+
+                            Button {
+                                whisperKeyVisible.toggle()
+                            } label: {
+                                Image(systemName: whisperKeyVisible ? "eye.slash" : "eye")
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                        }
+
+                        Text("Get your key at [platform.openai.com](https://platform.openai.com/api-keys)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+
+                        if !settings.openaiApiKey.isEmpty {
+                            HStack(spacing: 6) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                    .font(.system(size: 12))
+                                Text("API key configured")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                        }
                     }
                 }
             }
@@ -669,12 +799,14 @@ struct SettingsView: View {
                     }
                     .labelsHidden()
 
-                    Toggle("On-device recognition only", isOn: $settings.forceOnDeviceRecognition)
-                        .font(.system(size: 12))
+                    if settings.speechEngine == .apple {
+                        Toggle("On-device recognition only", isOn: $settings.forceOnDeviceRecognition)
+                            .font(.system(size: 12))
 
-                    Text("Uses Apple Neural Engine for private, offline speech recognition. May improve accuracy for some languages on Apple Silicon.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
+                        Text("Uses Apple Neural Engine for private, offline speech recognition. May improve accuracy for some languages on Apple Silicon.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
             }
 
@@ -1070,6 +1202,7 @@ struct SettingsView: View {
     // MARK: - AI Tab
 
     @State private var aiKeyVisible = false
+    @State private var whisperKeyVisible = false
 
     private var aiTab: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -1141,7 +1274,7 @@ struct SettingsView: View {
                 FlowCueService.shared.pages = pages.isEmpty ? [""] : pages
                 FlowCueService.shared.currentPageIndex = 0
                 FlowCueService.shared.readPages.removeAll()
-                dismiss()
+                close()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1260,6 +1393,8 @@ struct SettingsView: View {
         settings.autoNextPageDelay = 3
         settings.browserServerEnabled = false
         settings.browserServerPort = 7373
+        settings.speechEngine = .apple
+        settings.openaiApiKey = ""
     }
 
     private func refreshScreens() {

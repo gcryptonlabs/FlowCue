@@ -51,6 +51,10 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>FlowCue needs microphone access to follow your voice and highlight words as you speak.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>FlowCue uses speech recognition to track your reading position in real-time.</string>
 	<key>NSServices</key>
 	<array>
 		<dict>

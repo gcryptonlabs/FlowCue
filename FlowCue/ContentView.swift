@@ -14,7 +14,7 @@ struct ContentView: View {
     @State private var isDroppingPresentation = false
     @State private var dropError: String?
     @State private var dropAlertTitle: String = "Import Error"
-    @State private var showSettings = false
+    @State private var showSettingsSidebar = false
     @State private var showAbout = false
     @State private var isExpandingAI = false
     @State private var aiError: String?
@@ -58,6 +58,22 @@ Happy presenting! [wave]
     var body: some View {
         ZStack {
             HStack(spacing: 0) {
+                // Settings sidebar
+                if showSettingsSidebar {
+                    SettingsView(
+                        settings: NotchSettings.shared,
+                        isSidebar: true,
+                        onClose: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showSettingsSidebar = false
+                            }
+                        }
+                    )
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+
+                    Divider()
+                }
+
                 // Sidebar with page squares
                 if service.pages.count > 1 {
                     pageSidebar
@@ -156,13 +172,15 @@ Happy presenting! [wave]
             if NotchSettings.shared.aiApiKey.isEmpty {
                 Button("Open Settings") {
                     aiError = nil
-                    showSettings = true
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showSettingsSidebar = true
+                    }
                 }
             }
         } message: {
             Text(aiError ?? "")
         }
-        .frame(minWidth: 480, minHeight: 320)
+        .frame(minWidth: showSettingsSidebar ? 780 : 480, minHeight: 320)
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 if let fileURL = service.currentFileURL {
@@ -222,21 +240,22 @@ Happy presenting! [wave]
 
             ToolbarItem(placement: .automatic) {
                 Button {
-                    showSettings = true
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showSettingsSidebar.toggle()
+                    }
                 } label: {
                     Label("Settings", systemImage: "gearshape")
                 }
                 .help("Settings")
             }
         }
-        .sheet(isPresented: $showSettings) {
-            SettingsView(settings: NotchSettings.shared)
-        }
         .sheet(isPresented: $showAbout) {
             AboutView()
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
-            showSettings = true
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showSettingsSidebar.toggle()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openAbout)) { _ in
             showAbout = true

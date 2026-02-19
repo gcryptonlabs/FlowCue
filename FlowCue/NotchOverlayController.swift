@@ -530,12 +530,18 @@ struct NotchOverlayView: View {
                     .clipped()
 
                     if listeningMode == .wordTracking {
-                        Text(speechRecognizer.lastSpokenText.split(separator: " ").suffix(3).joined(separator: " "))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.5))
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(speechRecognizer.lastSpokenText.split(separator: " ").suffix(3).joined(separator: " "))
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.5))
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                            Text(speechRecognizer.debugStatus)
+                                .font(.system(size: 8, weight: .regular, design: .monospaced))
+                                .foregroundStyle(.yellow.opacity(0.6))
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         Spacer(minLength: 0)
                     }

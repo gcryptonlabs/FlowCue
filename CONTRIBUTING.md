@@ -71,16 +71,23 @@ We use conventional commit prefixes:
 
 ```
 FlowCue/
-  FlowCueApp.swift          # App entry point
-  ContentView.swift          # Main editor view
-  NotchSettings.swift        # Settings model + enums
-  SettingsView.swift         # Settings UI
-  SpeechRecognizer.swift     # Speech recognition engine
-  NotchOverlayController.swift  # Overlay views (Top Bar, Floating)
+  FlowCueApp.swift              # App entry point
+  ContentView.swift              # Main editor + settings sidebar
+  NotchSettings.swift            # Settings model, enums (SpeechEngine, OverlayMode, etc.)
+  SettingsView.swift             # Settings UI (sidebar + sheet modes)
+  SpeechRecognizer.swift         # Speech recognition (Apple, Whisper local, OpenAI cloud)
+  OpenAIWhisperClient.swift      # OpenAI Whisper API client + WAV conversion
+  NotchOverlayController.swift   # Overlay views (Top Bar, Floating)
   ExternalDisplayController.swift  # External display output
-  MarqueeTextView.swift      # Teleprompter text rendering
-  FlowCueService.swift       # App services (file import, browser server)
-  AIScriptExpander.swift     # Claude API integration
+  MarqueeTextView.swift          # Teleprompter text rendering
+  FlowCueService.swift           # App services (file import, browser server)
+  AIScriptExpander.swift         # Claude API integration
+  ScriptLibrary.swift            # Script persistence
+  ScriptLibraryView.swift        # Script library UI
+  BrowserServer.swift            # Remote control WebSocket server
+  PageManager.swift              # Multi-page management
+  HotkeyManager.swift            # Global hotkey registration
+  UpdateChecker.swift            # App update checks
 ```
 
 ## License

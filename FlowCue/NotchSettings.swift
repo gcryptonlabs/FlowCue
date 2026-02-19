@@ -276,6 +276,38 @@ enum ListeningMode: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Speech Engine
+
+enum SpeechEngine: String, CaseIterable, Identifiable {
+    case apple, whisperLocal, whisperCloud
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .apple:        return "Apple"
+        case .whisperLocal: return "Whisper"
+        case .whisperCloud: return "OpenAI"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .apple:        return "Built-in macOS speech recognition."
+        case .whisperLocal: return "Local AI via whisper.cpp. Multilingual, fully offline."
+        case .whisperCloud: return "OpenAI cloud API. Best accuracy, requires API key."
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .apple:        return "apple.logo"
+        case .whisperLocal: return "desktopcomputer"
+        case .whisperCloud: return "cloud"
+        }
+    }
+}
+
 // MARK: - Settings
 
 @Observable
@@ -397,6 +429,24 @@ class NotchSettings {
         didSet { UserDefaults.standard.set(forceOnDeviceRecognition, forKey: "forceOnDeviceRecognition") }
     }
 
+    var speechEngine: SpeechEngine {
+        didSet { UserDefaults.standard.set(speechEngine.rawValue, forKey: "speechEngine") }
+    }
+
+    /// Backward-compatible computed property
+    var useWhisperEngine: Bool {
+        get { speechEngine == .whisperLocal }
+        set { speechEngine = newValue ? .whisperLocal : .apple }
+    }
+
+    var whisperModelPath: String {
+        didSet { UserDefaults.standard.set(whisperModelPath, forKey: "whisperModelPath") }
+    }
+
+    var openaiApiKey: String {
+        didSet { UserDefaults.standard.set(openaiApiKey, forKey: "openaiApiKey") }
+    }
+
     var font: NSFont {
         fontFamilyPreset.font(size: fontSizePreset.pointSize)
     }
@@ -448,5 +498,20 @@ class NotchSettings {
         self.browserServerPort = savedPort > 0 ? UInt16(savedPort) : 7373
         self.aiApiKey = UserDefaults.standard.string(forKey: "aiApiKey") ?? ""
         self.forceOnDeviceRecognition = UserDefaults.standard.object(forKey: "forceOnDeviceRecognition") as? Bool ?? false
+        let modelPath = UserDefaults.standard.string(forKey: "whisperModelPath")
+            ?? (NSHomeDirectory() + "/Library/Application Support/superwhisper/ggml-small.bin")
+        self.whisperModelPath = modelPath
+        // Load speech engine with migration from old boolean
+        if let engineRaw = UserDefaults.standard.string(forKey: "speechEngine"),
+           let engine = SpeechEngine(rawValue: engineRaw) {
+            self.speechEngine = engine
+        } else if let oldBool = UserDefaults.standard.object(forKey: "useWhisperEngine") as? Bool {
+            self.speechEngine = oldBool ? .whisperLocal : .apple
+        } else {
+            let hasBin = FileManager.default.fileExists(atPath: "/opt/homebrew/bin/whisper-stream")
+            let hasModel = FileManager.default.fileExists(atPath: modelPath)
+            self.speechEngine = (hasBin && hasModel) ? .whisperLocal : .apple
+        }
+        self.openaiApiKey = UserDefaults.standard.string(forKey: "openaiApiKey") ?? ""
     }
 }

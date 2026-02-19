@@ -18,12 +18,21 @@ A native macOS teleprompter for presenters, streamers, and content creators. Rea
 
 | Mode | Description |
 |------|-------------|
-| **Smart Follow** | On-device speech recognition highlights each word as you speak. No cloud, no latency, works offline. Dozens of languages. |
+| **Smart Follow** | Speech recognition highlights each word as you speak. Choose from three recognition engines. |
 | **Auto-Scroll** | Steady scroll at your chosen speed. No microphone needed. |
 | **Voice Pace** | Moves when you speak, pauses when you're silent. |
 
-- **Auto-detect language** — NLLanguageRecognizer identifies your script's language and configures speech recognition automatically.
+### Recognition Engines
+
+| Engine | Description |
+|--------|-------------|
+| **Apple** | Built-in macOS speech recognition. Auto-detect language from script text, on-device Neural Engine mode. |
+| **Whisper (Local)** | Local AI via [whisper.cpp](https://github.com/ggerganov/whisper.cpp). Multilingual (99 languages), fully offline, auto-detects language from speech. |
+| **OpenAI (Cloud)** | OpenAI Whisper API. Best accuracy, requires API key. Configure in Settings → Voice. |
+
+- **Auto-detect language** — NLLanguageRecognizer identifies your script's language and configures Apple speech recognition automatically.
 - **On-device recognition** — Force Apple Neural Engine for private, offline processing on Apple Silicon.
+- **Local Whisper** — Requires `whisper-stream` binary and a GGML model (auto-detected from homebrew and superwhisper paths).
 
 ### Display Modes
 
@@ -89,6 +98,13 @@ Write bullet points or rough notes, tap the AI button — get a polished, ready-
 - QR code for quick connection
 - WebSocket-based real-time sync with full teleprompter view
 
+### Settings Sidebar
+
+- Integrated settings panel — slides out from the left edge of the main window
+- Compact icon tab strip with 7 categories: Style, Voice, Display, Screens, Connect, AI, Scripts
+- Toggle with the gear button or `⌘,`
+- Live preview of overlay changes while adjusting settings
+
 ### Customization
 
 - **Font**: Sans, Serif, Mono, OpenDyslexic
@@ -133,8 +149,11 @@ xattr -cr /Applications/FlowCue.app
 
 - Swift + SwiftUI + AppKit
 - Apple Speech Framework (on-device recognition via Neural Engine)
+- whisper.cpp integration (local Whisper model via `whisper-stream`)
+- OpenAI Whisper API (cloud transcription)
 - NaturalLanguage framework (auto language detection)
 - Claude API (AI script expansion)
+- AVFoundation (audio capture, format conversion)
 - Zero external dependencies
 - Sandboxed with minimal permissions
 
