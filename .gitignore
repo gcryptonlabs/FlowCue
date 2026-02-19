@@ -1,0 +1,25 @@
+# Xcode
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+DerivedData/
+build/
+
+# macOS
+.DS_Store
+*.dmg
+
+# Dependencies
+Pods/
+Carthage/
+
+# Archives
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Keys
+*.pem
+*.p12
+*.mobileprovision
