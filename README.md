@@ -140,7 +140,7 @@ Real-time AI assistant for live video calls. When someone asks you a question du
 
 ### Download
 
-Grab the latest DMG from [Releases](https://github.com/gcryptonlabs/FlowCue/releases).
+Grab the latest [FlowCue-2.1.0.dmg](FlowCue-2.1.0.dmg) or see [Releases](https://github.com/gcryptonlabs/FlowCue/releases).
 
 ### Build from Source
 
