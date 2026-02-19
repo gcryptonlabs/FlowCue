@@ -21,6 +21,9 @@ class FlowCueService: NSObject, ObservableObject {
     @Published var pages: [String] = [""]
     @Published var currentPageIndex: Int = 0
     @Published var readPages: Set<Int> = []
+    @Published var isConferenceMode: Bool = false
+
+    private var conferencePanel: NSPanel?
 
     var hasNextPage: Bool {
         for i in (currentPageIndex + 1)..<pages.count {
@@ -39,6 +42,11 @@ class FlowCueService: NSObject, ObservableObject {
     func readText(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        // Stop conference mode if active
+        if isConferenceMode {
+            stopConferenceMode()
+        }
 
         launchedExternally = true
         hideMainWindow()
@@ -148,6 +156,70 @@ class FlowCueService: NSObject, ObservableObject {
         readPages.removeAll()
         currentPageIndex = 0
         readCurrentPage()
+    }
+
+    // MARK: - Conference Mode
+
+    func startConferenceMode() {
+        // Stop script mode if active
+        if overlayController.isShowing {
+            overlayController.dismiss()
+        }
+
+        isConferenceMode = true
+        let copilot = ConferenceCopilot.shared
+        copilot.start()
+        showConferenceOverlay()
+    }
+
+    func stopConferenceMode() {
+        isConferenceMode = false
+        ConferenceCopilot.shared.stop()
+        dismissConferenceOverlay()
+    }
+
+    private func showConferenceOverlay() {
+        dismissConferenceOverlay()
+
+        let copilot = ConferenceCopilot.shared
+        let screen = NSScreen.main ?? NSScreen.screens[0]
+        let screenFrame = screen.frame
+
+        let panelWidth: CGFloat = 380
+        let panelHeight: CGFloat = 260
+        let margin: CGFloat = 20
+        let x = screenFrame.maxX - panelWidth - margin
+        let y = screenFrame.minY + margin
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: x, y: y, width: panelWidth, height: panelHeight),
+            styleMask: [.nonactivatingPanel, .titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.hasShadow = true
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.isMovableByWindowBackground = true
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        // Hide from screen share (invisible in Zoom/Meet)
+        if NotchSettings.shared.hideFromScreenShare {
+            panel.sharingType = .none
+        }
+
+        panel.contentView = NSHostingView(rootView: ConferenceOverlayView(copilot: copilot))
+        panel.orderFrontRegardless()
+        conferencePanel = panel
+    }
+
+    private func dismissConferenceOverlay() {
+        conferencePanel?.orderOut(nil)
+        conferencePanel = nil
     }
 
     func hideMainWindow() {

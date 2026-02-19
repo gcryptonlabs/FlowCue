@@ -20,6 +20,8 @@ struct ContentView: View {
     @State private var aiError: String?
     @FocusState private var isTextFocused: Bool
 
+    private var copilot: ConferenceCopilot { ConferenceCopilot.shared }
+
     private let defaultText = """
 Welcome to FlowCue! This is your personal teleprompter that sits right below your MacBook's notch. [smile]
 
@@ -81,37 +83,41 @@ Happy presenting! [wave]
 
                 // Main content area
                 ZStack {
-                    TextEditor(text: currentText)
-                        .font(.system(size: 15, weight: .regular))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .focused($isTextFocused)
+                    if service.isConferenceMode {
+                        conferenceDashboard
+                    } else {
+                        TextEditor(text: currentText)
+                            .font(.system(size: 15, weight: .regular))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .focused($isTextFocused)
 
-                    // Floating action button (bottom-right)
-                    VStack {
-                        Spacer()
-                        HStack {
+                        // Floating action button (bottom-right)
+                        VStack {
                             Spacer()
-                            Button {
-                                if isRunning {
-                                    stop()
-                                } else {
-                                    run()
+                            HStack {
+                                Spacer()
+                                Button {
+                                    if isRunning {
+                                        stop()
+                                    } else {
+                                        run()
+                                    }
+                                } label: {
+                                    Image(systemName: isRunning ? "stop.fill" : "play.fill")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                        .frame(width: 44, height: 44)
+                                        .background(isRunning ? Color.red : Color.accentColor)
+                                        .clipShape(Circle())
+                                        .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
                                 }
-                            } label: {
-                                Image(systemName: isRunning ? "stop.fill" : "play.fill")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(.white)
-                                    .frame(width: 44, height: 44)
-                                    .background(isRunning ? Color.red : Color.accentColor)
-                                    .clipShape(Circle())
-                                    .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+                                .buttonStyle(.plain)
+                                .disabled(!isRunning && !hasAnyContent)
+                                .opacity(!hasAnyContent && !isRunning ? 0.4 : 1)
                             }
-                            .buttonStyle(.plain)
-                            .disabled(!isRunning && !hasAnyContent)
-                            .opacity(!hasAnyContent && !isRunning ? 0.4 : 1)
+                            .padding(16)
                         }
-                        .padding(16)
                     }
                 }
             }
@@ -239,6 +245,27 @@ Happy presenting! [wave]
             }
 
             ToolbarItem(placement: .automatic) {
+                Picker("Mode", selection: Binding(
+                    get: { service.isConferenceMode },
+                    set: { newValue in
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            if newValue {
+                                service.startConferenceMode()
+                            } else {
+                                service.stopConferenceMode()
+                            }
+                        }
+                    }
+                )) {
+                    Label("Script", systemImage: "doc.text").tag(false)
+                    Label("Conference", systemImage: "person.wave.2").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 180)
+                .help("Switch between Script and Conference mode")
+            }
+
+            ToolbarItem(placement: .automatic) {
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showSettingsSidebar.toggle()
@@ -282,6 +309,138 @@ Happy presenting! [wave]
             } else {
                 isTextFocused = true
             }
+        }
+    }
+
+    // MARK: - Conference Dashboard
+
+    private var conferenceDashboard: some View {
+        VStack(spacing: 0) {
+            // Status + controls
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(copilot.state == .listening ? Color.green : (copilot.state == .generating ? Color.orange : Color.gray))
+                    .frame(width: 10, height: 10)
+                Text(copilot.state.rawValue.capitalized)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                if copilot.state != .idle {
+                    Button {
+                        copilot.generateAnswer()
+                    } label: {
+                        Label(
+                            copilot.state == .displaying ? "Dismiss" : "Get Answer",
+                            systemImage: copilot.state == .displaying ? "xmark.circle" : "sparkles"
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(copilot.state == .generating)
+                    .keyboardShortcut("a", modifiers: [.command, .shift])
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+
+            Divider().padding(.horizontal, 16)
+
+            // Context hint
+            HStack(spacing: 8) {
+                Image(systemName: "person.text.rectangle")
+                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12))
+                TextField("Context: your role, topic, audience...", text: Binding(
+                    get: { NotchSettings.shared.conferenceContextHint },
+                    set: { NotchSettings.shared.conferenceContextHint = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12))
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
+
+            Divider().padding(.horizontal, 16)
+
+            // AI Response (if any)
+            if !copilot.currentResponse.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("AI Answer")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text(copilot.currentResponse)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineSpacing(3)
+                        .textSelection(.enabled)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.accentColor.opacity(0.05))
+
+                Divider().padding(.horizontal, 16)
+            }
+
+            // Live transcript
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Live Transcript")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+
+                ScrollView(.vertical) {
+                    Text(copilot.rollingTranscript.isEmpty ? "Waiting for speech..." : copilot.rollingTranscript)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(copilot.rollingTranscript.isEmpty ? .tertiary : .primary)
+                        .lineSpacing(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 6)
+                        .textSelection(.enabled)
+                }
+            }
+            .frame(maxHeight: .infinity)
+
+            // Error
+            if let error = copilot.error {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.system(size: 11))
+                    Text(error)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 8)
+            }
+
+            // Bottom bar
+            HStack(spacing: 8) {
+                AudioWaveformProgressView(
+                    levels: copilot.recognizerAudioLevels,
+                    progress: 0
+                )
+                .frame(width: 60, height: 18)
+
+                Text(copilot.activeLocale)
+                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+
+                Spacer()
+
+                Text("\u{2318}\u{21E7}A answer \u{00B7} \u{2318}\u{21E7}C toggle")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.quaternary)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
         }
     }
 

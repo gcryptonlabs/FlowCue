@@ -1260,6 +1260,113 @@ struct SettingsView: View {
                 }
             }
 
+            Divider()
+
+            // Conference Copilot section
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Image(systemName: "person.wave.2")
+                        .foregroundStyle(.blue)
+                        .font(.system(size: 14))
+                    Text("Conference Copilot")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+
+                Text("AI-powered answers during live video calls. Press \u{2318}\u{21E7}A to generate a natural response from the conversation transcript.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+
+                // AI Provider
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("AI Provider")
+                        .font(.system(size: 12, weight: .medium))
+                    Picker("", selection: $settings.conferenceAIProvider) {
+                        ForEach(AIProvider.allCases) { provider in
+                            Text(provider.label).tag(provider)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+
+                // Model selector
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Model")
+                        .font(.system(size: 12, weight: .medium))
+                    if settings.conferenceAIProvider == .claude {
+                        TextField("claude-sonnet-4-20250514", text: $settings.conferenceClaudeModel)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11, design: .monospaced))
+                    } else {
+                        TextField("gpt-4o", text: $settings.conferenceOpenAIModel)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11, design: .monospaced))
+                    }
+                }
+
+                // OpenAI API key (shown when OpenAI provider selected)
+                if settings.conferenceAIProvider == .openai {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("OpenAI API Key")
+                            .font(.system(size: 12, weight: .medium))
+                        SecureField("sk-...", text: $settings.openaiApiKey)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11, design: .monospaced))
+                    }
+                }
+
+                // Context hint
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Context Hint")
+                        .font(.system(size: 12, weight: .medium))
+                    TextField("e.g. CTO of a fintech startup, speaking about product roadmap", text: $settings.conferenceContextHint)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 11))
+                    Text("Helps AI match your speaking style and domain knowledge.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+
+                // Transcript buffer
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Transcript Buffer")
+                        .font(.system(size: 12, weight: .medium))
+                    Picker("", selection: $settings.conferenceTranscriptDuration) {
+                        Text("30s").tag(30)
+                        Text("60s").tag(60)
+                        Text("90s").tag(90)
+                        Text("120s").tag(120)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    Text("How much conversation context to send to AI.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+
+                // Hotkey reference
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Hotkeys")
+                        .font(.system(size: 12, weight: .medium))
+                    Group {
+                        Text("\u{2318}\u{21E7}C \u{2014} Toggle Conference mode")
+                        Text("\u{2318}\u{21E7}A \u{2014} Generate answer / dismiss")
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                }
+
+                // Audio source tip
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Tip: System Audio")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Text("To capture your caller's voice, install [BlackHole](https://existential.audio/blackhole/) and use a Multi-Output Device in Audio MIDI Setup.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
             Spacer()
         }
         .padding(16)
@@ -1395,6 +1502,11 @@ struct SettingsView: View {
         settings.browserServerPort = 7373
         settings.speechEngine = .apple
         settings.openaiApiKey = ""
+        settings.conferenceAIProvider = .claude
+        settings.conferenceClaudeModel = "claude-sonnet-4-20250514"
+        settings.conferenceOpenAIModel = "gpt-4o"
+        settings.conferenceContextHint = ""
+        settings.conferenceTranscriptDuration = 90
     }
 
     private func refreshScreens() {

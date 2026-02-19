@@ -50,6 +50,19 @@ Write bullet points or rough notes, tap the AI button — get a polished, ready-
 - Expands notes into natural, conversational speech with `[pause]` markers
 - Configure in Settings → AI
 
+### AI Conference Copilot
+
+Real-time AI assistant for live video calls. When someone asks you a question during a Zoom, Meet, or Teams call, press `⌘⇧A` — AI generates a natural-sounding answer that appears in a floating overlay, invisible to screen share. Read the answer while maintaining eye contact with the camera.
+
+- **Streaming responses** — answers appear word-by-word as they're generated
+- **Natural speech** — built-in system prompt makes responses sound human, not robotic
+- **Dual provider support** — Claude (Anthropic) or OpenAI GPT-4o
+- **Context hint** — tell the AI your role and topic for better answers
+- **Rolling transcript** — configurable buffer (30-120 seconds) of conversation context
+- **Invisible overlay** — hidden from screen sharing (Zoom, Meet, Teams can't see it)
+- **Hotkeys** — `⌘⇧C` toggle conference mode, `⌘⇧A` generate/dismiss answer
+- Configure in Settings → AI → Conference Copilot
+
 ### Script Library
 
 - Save, rename, and organize scripts
@@ -79,6 +92,8 @@ Write bullet points or rough notes, tap the AI button — get a polished, ready-
 | `⌘⇧Space` | Play / Pause (works from any app) |
 | `⌘⇧R` | Reset to beginning |
 | `⌘⇧←` | Jump back |
+| `⌘⇧A` | Generate AI answer / dismiss (Conference mode) |
+| `⌘⇧C` | Toggle Conference mode on/off |
 
 ### Live Stats
 
@@ -152,7 +167,8 @@ xattr -cr /Applications/FlowCue.app
 - whisper.cpp integration (local Whisper model via `whisper-stream`)
 - OpenAI Whisper API (cloud transcription)
 - NaturalLanguage framework (auto language detection)
-- Claude API (AI script expansion)
+- Claude API (AI script expansion + Conference Copilot)
+- OpenAI API (Conference Copilot, GPT-4o support)
 - AVFoundation (audio capture, format conversion)
 - Zero external dependencies
 - Sandboxed with minimal permissions

@@ -276,6 +276,28 @@ enum ListeningMode: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - AI Provider (Conference Copilot)
+
+enum AIProvider: String, CaseIterable, Identifiable {
+    case claude, openai
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .claude: return "Claude"
+        case .openai: return "OpenAI"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .claude: return "brain.head.profile"
+        case .openai: return "globe"
+        }
+    }
+}
+
 // MARK: - Speech Engine
 
 enum SpeechEngine: String, CaseIterable, Identifiable {
@@ -447,6 +469,28 @@ class NotchSettings {
         didSet { UserDefaults.standard.set(openaiApiKey, forKey: "openaiApiKey") }
     }
 
+    // MARK: - Conference Copilot Settings
+
+    var conferenceAIProvider: AIProvider {
+        didSet { UserDefaults.standard.set(conferenceAIProvider.rawValue, forKey: "conferenceAIProvider") }
+    }
+
+    var conferenceClaudeModel: String {
+        didSet { UserDefaults.standard.set(conferenceClaudeModel, forKey: "conferenceClaudeModel") }
+    }
+
+    var conferenceOpenAIModel: String {
+        didSet { UserDefaults.standard.set(conferenceOpenAIModel, forKey: "conferenceOpenAIModel") }
+    }
+
+    var conferenceContextHint: String {
+        didSet { UserDefaults.standard.set(conferenceContextHint, forKey: "conferenceContextHint") }
+    }
+
+    var conferenceTranscriptDuration: Int {
+        didSet { UserDefaults.standard.set(conferenceTranscriptDuration, forKey: "conferenceTranscriptDuration") }
+    }
+
     var font: NSFont {
         fontFamilyPreset.font(size: fontSizePreset.pointSize)
     }
@@ -513,5 +557,13 @@ class NotchSettings {
             self.speechEngine = (hasBin && hasModel) ? .whisperLocal : .apple
         }
         self.openaiApiKey = UserDefaults.standard.string(forKey: "openaiApiKey") ?? ""
+
+        // Conference Copilot settings
+        self.conferenceAIProvider = AIProvider(rawValue: UserDefaults.standard.string(forKey: "conferenceAIProvider") ?? "") ?? .claude
+        self.conferenceClaudeModel = UserDefaults.standard.string(forKey: "conferenceClaudeModel") ?? "claude-sonnet-4-20250514"
+        self.conferenceOpenAIModel = UserDefaults.standard.string(forKey: "conferenceOpenAIModel") ?? "gpt-4o"
+        self.conferenceContextHint = UserDefaults.standard.string(forKey: "conferenceContextHint") ?? ""
+        let savedTranscriptDuration = UserDefaults.standard.integer(forKey: "conferenceTranscriptDuration")
+        self.conferenceTranscriptDuration = savedTranscriptDuration > 0 ? savedTranscriptDuration : 90
     }
 }

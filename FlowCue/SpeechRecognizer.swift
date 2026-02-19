@@ -85,6 +85,23 @@ class SpeechRecognizer {
     /// The locale actually used for the current recognition session (for UI display)
     var activeLocale: String = ""
 
+    // MARK: - Free Transcription Mode (Conference Copilot)
+    var freeTranscriptionMode: Bool = false
+    var onTranscriptUpdate: ((String) -> Void)?
+
+    func startFreeTranscription() {
+        freeTranscriptionMode = true
+        sourceText = ""
+        normalizedSource = ""
+        start(with: "")
+    }
+
+    func stopFreeTranscription() {
+        freeTranscriptionMode = false
+        onTranscriptUpdate = nil
+        stop()
+    }
+
     /// True when recent audio levels indicate the user is actively speaking
     var isSpeaking: Bool {
         let recent = audioLevels.suffix(10)
@@ -326,7 +343,7 @@ class SpeechRecognizer {
         }
 
         let locale: String
-        if NotchSettings.shared.autoDetectLanguage, let detected = Self.detectLanguage(from: sourceText), !failedLocales.contains(detected) {
+        if !freeTranscriptionMode && NotchSettings.shared.autoDetectLanguage, let detected = Self.detectLanguage(from: sourceText), !failedLocales.contains(detected) {
             locale = detected
             debugStatus = "Auto: \(detected)"
         } else {
@@ -418,8 +435,12 @@ class SpeechRecognizer {
                     self.lastSpokenText = spoken
                     self.debugStatus = "Heard: \(spoken.suffix(30))"
                     NSLog("[FlowCue] Recognized: \(spoken.suffix(50))")
-                    self.matchCharacters(spoken: spoken)
-                    NSLog("[FlowCue] charCount=\(self.recognizedCharCount)/\(self.sourceText.count)")
+                    if self.freeTranscriptionMode {
+                        self.onTranscriptUpdate?(spoken)
+                    } else {
+                        self.matchCharacters(spoken: spoken)
+                        NSLog("[FlowCue] charCount=\(self.recognizedCharCount)/\(self.sourceText.count)")
+                    }
                 }
             }
             if let err = error {
@@ -447,7 +468,7 @@ class SpeechRecognizer {
                         return
                     }
 
-                    if self.isListening && !self.shouldDismiss && !self.sourceText.isEmpty && self.retryCount < self.maxRetries {
+                    if self.isListening && !self.shouldDismiss && (!self.sourceText.isEmpty || self.freeTranscriptionMode) && self.retryCount < self.maxRetries {
                         self.retryCount += 1
                         // Preserve progress: start matching from current position after restart
                         self.matchStartOffset = self.recognizedCharCount
@@ -796,7 +817,7 @@ class SpeechRecognizer {
             DispatchQueue.main.async {
                 guard let self, self.sessionGeneration == currentGen else { return }
                 NSLog("[FlowCue] whisper-stream exited with code \(proc.terminationStatus)")
-                if self.isListening && !self.shouldDismiss {
+                if self.isListening && !self.shouldDismiss && (!self.sourceText.isEmpty || self.freeTranscriptionMode) {
                     self.debugStatus = "Whisper stopped, restarting..."
                     self.scheduleBeginRecognition(after: 1.0)
                 }
@@ -847,8 +868,12 @@ class SpeechRecognizer {
         lastSpokenText = String(cleaned.suffix(60))
         debugStatus = "Whisper: \(cleaned.suffix(30))"
         NSLog("[FlowCue] Whisper heard: \(cleaned.suffix(80))")
-        matchCharacters(spoken: cleaned)
-        NSLog("[FlowCue] charCount=\(recognizedCharCount)/\(sourceText.count)")
+        if freeTranscriptionMode {
+            onTranscriptUpdate?(cleaned)
+        } else {
+            matchCharacters(spoken: cleaned)
+            NSLog("[FlowCue] charCount=\(recognizedCharCount)/\(sourceText.count)")
+        }
     }
 
     private func stopWhisper() {
@@ -978,8 +1003,12 @@ class SpeechRecognizer {
                     self.lastSpokenText = String(cleaned.suffix(60))
                     self.debugStatus = "Cloud: \(cleaned.suffix(30))"
                     NSLog("[FlowCue] Cloud Whisper: \(cleaned.suffix(80))")
-                    self.matchCharacters(spoken: cleaned)
-                    NSLog("[FlowCue] charCount=\(self.recognizedCharCount)/\(self.sourceText.count)")
+                    if self.freeTranscriptionMode {
+                        self.onTranscriptUpdate?(cleaned)
+                    } else {
+                        self.matchCharacters(spoken: cleaned)
+                        NSLog("[FlowCue] charCount=\(self.recognizedCharCount)/\(self.sourceText.count)")
+                    }
                 }
             } catch {
                 await MainActor.run {

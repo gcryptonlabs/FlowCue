@@ -2,7 +2,8 @@
 //  HotkeyManager.swift
 //  FlowCue
 //
-//  Global hotkeys: ⌘⇧Space (toggle), ⌘⇧R (reset), ⌘⇧← (jump back).
+//  Global hotkeys: ⌘⇧Space (toggle), ⌘⇧R (reset), ⌘⇧← (jump back),
+//  ⌘⇧A (AI answer), ⌘⇧C (conference toggle).
 //
 
 import AppKit
@@ -57,6 +58,12 @@ class HotkeyManager {
         case 123: // Left arrow — jump back
             jumpBack()
             return true
+        case 0: // A — generate AI answer / dismiss
+            conferenceAnswer()
+            return true
+        case 8: // C — toggle conference mode
+            conferenceToggle()
+            return true
         default:
             return false
         }
@@ -90,6 +97,25 @@ class HotkeyManager {
             let current = recognizer.recognizedCharCount
             let jumpAmount = 90 // ~15 words
             recognizer.jumpTo(charOffset: max(0, current - jumpAmount))
+        }
+    }
+
+    private func conferenceAnswer() {
+        DispatchQueue.main.async {
+            let service = FlowCueService.shared
+            guard service.isConferenceMode else { return }
+            ConferenceCopilot.shared.generateAnswer()
+        }
+    }
+
+    private func conferenceToggle() {
+        DispatchQueue.main.async {
+            let service = FlowCueService.shared
+            if service.isConferenceMode {
+                service.stopConferenceMode()
+            } else {
+                service.startConferenceMode()
+            }
         }
     }
 }
